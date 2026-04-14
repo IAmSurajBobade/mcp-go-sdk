@@ -40,19 +40,30 @@ func (e Event) Empty() bool {
 	return e.Name == "" && e.ID == "" && len(e.Data) == 0 && e.Retry == ""
 }
 
+// sanitizeSSEField removes CR/LF so SSE single-line fields can't inject
+// additional fields or events.
+func sanitizeSSEField(s string) string {
+	s = strings.ReplaceAll(s, "\r", "")
+	s = strings.ReplaceAll(s, "\n", "")
+	return s
+}
+
 // writeEvent writes the event to w, and flushes.
 func writeEvent(w http.ResponseWriter, evt Event) (int, error) {
 	var b bytes.Buffer
 	if evt.Name != "" {
-		fmt.Fprintf(&b, "event: %s\n", evt.Name)
+		fmt.Fprintf(&b, "event: %s\n", sanitizeSSEField(evt.Name))
 	}
 	if evt.ID != "" {
-		fmt.Fprintf(&b, "id: %s\n", evt.ID)
+		fmt.Fprintf(&b, "id: %s\n", sanitizeSSEField(evt.ID))
 	}
 	if evt.Retry != "" {
-		fmt.Fprintf(&b, "retry: %s\n", evt.Retry)
+		fmt.Fprintf(&b, "retry: %s\n", sanitizeSSEField(evt.Retry))
 	}
-	fmt.Fprintf(&b, "data: %s\n\n", string(evt.Data))
+	for _, line := range strings.Split(string(evt.Data), "\n") {
+		fmt.Fprintf(&b, "data: %s\n", strings.TrimSuffix(line, "\r"))
+	}
+	fmt.Fprint(&b, "\n")
 	n, err := w.Write(b.Bytes())
 	rc := http.NewResponseController(w)
 	// Ignore returned error as flushing is best-effort.
